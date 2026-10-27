@@ -1,0 +1,48 @@
+name: Build and Release Badai
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Publish Windows app
+        shell: pwsh
+        run: |
+          dotnet publish BadaiNotch/BadaiNotch.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained false `
+            -p:PublishSingleFile=true `
+            -o publish
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/BadaiNotch.iss
+
+      - name: Upload installer to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installer/Output/Badai-Setup.exe
