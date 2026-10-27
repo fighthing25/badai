@@ -1,12 +1,11 @@
-using System.Windows;
-
-namespace BadaiNotch;
-
-public partial class App : Application
-{
-    protected override void OnStartup(StartupEventArgs e)
-    {
-        base.OnStartup(e);
-        ShutdownMode = ShutdownMode.OnExplicitShutdown;
-    }
-}
+bin/
+obj/
+publish/
+.vs/
+*.user
+*.suo
+*.cache
+*.pdb
+*.log
+Thumbs.db
+Desktop.ini
