@@ -1,14 +1,23 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>BadaiNotch</RootNamespace>
-    <AssemblyName>BadaiNotch</AssemblyName>
-  </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
-  </ItemGroup>
-</Project>
+using System;
+using System.Media;
+using System.Windows;
+
+namespace BadaiNotch;
+
+public sealed class PrayerNotificationService
+{
+    public void ShowPrayerNotification(string prayerName, DateTime prayerTime)
+    {
+        try
+        {
+            SystemSounds.Beep.Play();
+        }
+        catch
+        {
+            // ignore sound errors, still show the message if needed
+        }
+
+        var message = $"{prayerName} akan dimulai pada {prayerTime:HH:mm}.";
+        MessageBox.Show(message, "Waktu Shalat", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+}
