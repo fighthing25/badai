@@ -1,83 +1,256 @@
-<Window x:Class="BadaiNotch.MainWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Badai Notch"
-        Height="96"
-        Width="260"
-        WindowStyle="None"
-        AllowsTransparency="True"
-        Background="Transparent"
-        Topmost="True"
-        ShowInTaskbar="False"
-        ResizeMode="NoResize"
-        SizeToContent="WidthAndHeight"
-        WindowStartupLocation="Manual"
-        SnapsToDevicePixels="True"
-        MouseDoubleClick="Window_MouseDoubleClick">
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
 
-    <Window.Resources>
-        <Style x:Key="EyeStyle" TargetType="Border">
-            <Setter Property="Width" Value="30"/>
-            <Setter Property="Height" Value="30"/>
-            <Setter Property="CornerRadius" Value="15"/>
-            <Setter Property="Background" Value="#F8FAFC"/>
-            <Setter Property="BorderBrush" Value="#E2E8F0"/>
-            <Setter Property="BorderThickness" Value="1.5"/>
-        </Style>
-    </Window.Resources>
+namespace BadaiNotch;
 
-    <Border x:Name="RootBorder"
-            CornerRadius="26"
-            Background="#0F172A"
-            BorderBrush="#334155"
-            BorderThickness="1.5"
-            Padding="12,10,12,10"
-            Opacity="1">
-        <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
+public partial class MainWindow : Window
+{
+    private readonly AppSettings _settings = AppSettings.Load();
+    private readonly PrayerScheduleService _prayerScheduleService = new();
+    private readonly DispatcherTimer _hideTimer = new();
+    private readonly DispatcherTimer _blinkTimer = new();
+    private DateTime _lastInteraction = DateTime.Now;
+    private bool _isVisible = true;
 
-            <Border Grid.Column="0"
-                    x:Name="EyeLeft"
-                    Style="{StaticResource EyeStyle}"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center">
-                <Grid>
-                    <Ellipse Width="12" Height="12" Fill="#0F172A" Margin="0"/>
-                    <Ellipse Width="5" Height="5" Fill="#F8FAFC" Margin="6,-2,0,0"/>
-                </Grid>
-            </Border>
+    public MainWindow()
+    {
+        InitializeComponent();
 
-            <StackPanel Grid.Column="1"
-                        VerticalAlignment="Center"
-                        HorizontalAlignment="Center"
-                        Margin="10,0">
-                <TextBlock x:Name="NextPrayerText"
-                           Foreground="#F8FAFC"
-                           FontWeight="SemiBold"
-                           FontSize="18"
-                           HorizontalAlignment="Center"
-                           Text="Ashar"/>
-                <TextBlock x:Name="CountdownText"
-                           Foreground="#A5B4FC"
-                           FontSize="12"
-                           HorizontalAlignment="Center"
-                           Text="00:10:00"/>
-            </StackPanel>
+        Width = 220;
+        Height = 90;
+        Top = 0;
+        Left = (SystemParameters.WorkArea.Width - Width) / 2;
 
-            <Border Grid.Column="2"
-                    x:Name="EyeRight"
-                    Style="{StaticResource EyeStyle}"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center">
-                <Grid>
-                    <Ellipse Width="12" Height="12" Fill="#0F172A" Margin="0"/>
-                    <Ellipse Width="5" Height="5" Fill="#F8FAFC" Margin="6,-2,0,0"/>
-                </Grid>
-            </Border>
-        </Grid>
-    </Border>
-</Window>
+        MouseMove += (_, _) => OnUserInteraction();
+        MouseEnter += (_, _) => OnUserInteraction();
+        MouseLeave += (_, _) => StartIdleHide();
+        PreviewMouseLeftButtonDown += (_, _) => OnUserInteraction();
+
+        _hideTimer.Interval = TimeSpan.FromSeconds(Math.Max(1, _settings.HideDelaySeconds));
+        _hideTimer.Tick += (_, _) =>
+        {
+            if ((DateTime.Now - _lastInteraction).TotalSeconds >= _settings.HideDelaySeconds)
+            {
+                SetVisible(false);
+            }
+        };
+
+        _blinkTimer.Interval = TimeSpan.FromSeconds(3);
+        _blinkTimer.Tick += (_, _) =>
+        {
+            TriggerBlink();
+            _blinkTimer.Interval = TimeSpan.FromSeconds(new Random().Next(2, 7));
+        };
+
+        Loaded += async (_, _) =>
+        {
+            await RefreshPrayerTimesAsync();
+            StartIdleHide();
+            _blinkTimer.Start();
+        };
+    }
+
+    private void OnUserInteraction()
+    {
+        _lastInteraction = DateTime.Now;
+        SetVisible(true);
+        _hideTimer.Stop();
+        _hideTimer.Start();
+    }
+
+    private void StartIdleHide()
+    {
+        _hideTimer.Stop();
+        _hideTimer.Start();
+    }
+
+    private void SetVisible(bool visible)
+    {
+        _isVisible = visible;
+        RootBorder.Opacity = visible ? 1 : 0.08;
+        RootBorder.IsHitTestVisible = visible;
+    }
+
+    private void TriggerBlink()
+    {
+        if (!_isVisible)
+        {
+            return;
+        }
+
+        var blink = new DoubleAnimation
+        {
+            From = 1,
+            To = 0.1,
+            Duration = TimeSpan.FromMilliseconds(140),
+            AutoReverse = true,
+            FillBehavior = FillBehavior.Stop
+        };
+
+        EyeLeft.BeginAnimation(OpacityProperty, blink);
+        EyeRight.BeginAnimation(OpacityProperty, blink);
+    }
+
+    private async Task RefreshPrayerTimesAsync()
+    {
+        var timings = await _prayerScheduleService.GetTodayTimingsAsync(_settings.SelectedCity, "Indonesia");
+        if (timings is null)
+        {
+            NextPrayerText.Text = "Kota";
+            CountdownText.Text = _settings.SelectedCity;
+            return;
+        }
+
+        var nextPrayer = GetNextPrayer(timings);
+        NextPrayerText.Text = nextPrayer.Name;
+
+        var updateEverySecond = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(1)
+        };
+
+        updateEverySecond.Tick += (_, _) =>
+        {
+            var current = GetNextPrayer(timings);
+            NextPrayerText.Text = current.Name;
+            var remaining = current.Time - DateTime.Now;
+            if (remaining < TimeSpan.Zero)
+            {
+                remaining = TimeSpan.Zero;
+            }
+
+            CountdownText.Text = remaining.ToString("hh\\:mm\\:ss");
+        };
+
+        updateEverySecond.Start();
+    }
+
+    private static (string Name, DateTime Time) GetNextPrayer(PrayerTimings timings)
+    {
+        var prayerTimes = new List<(string Name, DateTime Time)>
+        {
+            ("Subuh", ParsePrayerTime(timings.Fajr, DateTime.Today)),
+            ("Dzuhur", ParsePrayerTime(timings.Dhuhr, DateTime.Today)),
+            ("Ashar", ParsePrayerTime(timings.Asr, DateTime.Today)),
+            ("Maghrib", ParsePrayerTime(timings.Maghrib, DateTime.Today)),
+            ("Isya", ParsePrayerTime(timings.Isha, DateTime.Today))
+        };
+
+        var now = DateTime.Now;
+        foreach (var prayer in prayerTimes)
+        {
+            if (prayer.Time > now)
+            {
+                return prayer;
+            }
+        }
+
+        return prayerTimes.First();
+    }
+
+    private static DateTime ParsePrayerTime(string value, DateTime date)
+    {
+        var parts = value.Split(':');
+        if (parts.Length < 2)
+        {
+            return date.AddHours(6);
+        }
+
+        var hour = int.Parse(parts[0]);
+        var minute = int.Parse(parts[1]);
+        return new DateTime(date.Year, date.Month, date.Day, hour, minute, 0);
+    }
+}
+
+public sealed class AppSettings
+{
+    public int HideDelaySeconds { get; set; } = 1;
+    public string SelectedCity { get; set; } = "Jakarta";
+    public bool NotificationsEnabled { get; set; } = true;
+    public int NotificationMinutesBefore { get; set; } = 10;
+
+    public static AppSettings Load()
+    {
+        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BadaiNotch");
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, "settings.json");
+
+        if (!File.Exists(path))
+        {
+            return new AppSettings();
+        }
+
+        try
+        {
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+        }
+        catch
+        {
+            return new AppSettings();
+        }
+    }
+
+    public void Save()
+    {
+        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BadaiNotch");
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, "settings.json");
+        var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(path, json);
+    }
+}
+
+public sealed class PrayerScheduleService
+{
+    public async Task<PrayerTimings?> GetTodayTimingsAsync(string city, string country)
+    {
+        try
+        {
+            using var client = new HttpClient();
+            var encodedCity = Uri.EscapeDataString(city);
+            var encodedCountry = Uri.EscapeDataString(country);
+            var url = $"https://api.aladhan.com/v1/timingsByCity?city={encodedCity}&country={encodedCountry}&method=2";
+            var json = await client.GetStringAsync(url);
+            using var document = JsonDocument.Parse(json);
+
+            var root = document.RootElement;
+            if (!root.TryGetProperty("data", out var data) || !data.TryGetProperty("timings", out var timings))
+            {
+                return null;
+            }
+
+            return new PrayerTimings
+            {
+                Fajr = timings.GetProperty("Fajr").GetString() ?? "05:00",
+                Dhuhr = timings.GetProperty("Dhuhr").GetString() ?? "12:00",
+                Asr = timings.GetProperty("Asr").GetString() ?? "15:00",
+                Maghrib = timings.GetProperty("Maghrib").GetString() ?? "18:00",
+                Isha = timings.GetProperty("Isha").GetString() ?? "19:00"
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}
+
+public sealed class PrayerTimings
+{
+    public string Fajr { get; set; } = "05:00";
+    public string Dhuhr { get; set; } = "12:00";
+    public string Asr { get; set; } = "15:00";
+    public string Maghrib { get; set; } = "18:00";
+    public string Isha { get; set; } = "19:00";
+}
