@@ -1,6 +1,7 @@
 name: Build and Release Badai
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -19,7 +20,8 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Restore dependencies
-        run: dotnet restore
+        shell: pwsh
+        run: dotnet restore Badai.sln
 
       - name: Publish Windows app
         shell: pwsh
@@ -36,6 +38,11 @@ jobs:
         run: |
           choco install innosetup -y
 
+      - name: Ensure installer output folder exists
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path installer/Output | Out-Null
+
       - name: Build installer
         shell: pwsh
         run: |
@@ -44,5 +51,6 @@ jobs:
       - name: Upload installer to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: true
           files: |
             installer/Output/Badai-Setup.exe
