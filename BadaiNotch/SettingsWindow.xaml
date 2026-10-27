@@ -1,350 +1,39 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Text.Json;
-using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Input;
-using System.Windows.Media.Animation;
-using System.Windows.Threading;
+<Window x:Class="BadaiNotch.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Badai Settings"
+        Width="380"
+        Height="290"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False">
 
-namespace BadaiNotch;
+    <Grid Margin="18">
+        <StackPanel>
+            <TextBlock Text="Hide delay (seconds)" Margin="0,0,0,6" FontWeight="SemiBold"/>
+            <Slider x:Name="HideDelaySlider" Minimum="1" Maximum="10" Value="1" TickPlacement="BottomRight" IsSnapToTickEnabled="True"/>
 
-public partial class MainWindow : Window
-{
-    private readonly AppSettings _settings;
-    private readonly PrayerScheduleService _prayerService;
-    private readonly DispatcherTimer _hideTimer;
-    private readonly DispatcherTimer _blinkTimer;
-    private readonly DispatcherTimer _clockTimer;
-    private readonly PrayerNotificationService _notificationService;
-    private readonly Random _random = new();
-    private PrayerTimeInfo? _nextPrayer;
-    private DateTime _lastInteraction = DateTime.Now;
-    private bool _isVisible = true;
-    private string? _lastNotificationPrayer;
+            <TextBlock Text="Selected city" Margin="0,14,0,6" FontWeight="SemiBold"/>
+            <ComboBox x:Name="CityComboBox" SelectedIndex="0">
+                <ComboBoxItem>Jakarta</ComboBoxItem>
+                <ComboBoxItem>Bandung</ComboBoxItem>
+                <ComboBoxItem>Surabaya</ComboBoxItem>
+                <ComboBoxItem>Semarang</ComboBoxItem>
+                <ComboBoxItem>Yogyakarta</ComboBoxItem>
+                <ComboBoxItem>Medan</ComboBoxItem>
+                <ComboBoxItem>Bekasi</ComboBoxItem>
+                <ComboBoxItem>Makassar</ComboBoxItem>
+                <ComboBoxItem>Palembang</ComboBoxItem>
+            </ComboBox>
 
-    public MainWindow()
-    {
-        InitializeComponent();
-        _settings = AppSettings.Load();
-        _prayerService = new PrayerScheduleService();
-        _notificationService = new PrayerNotificationService();
-        _hideTimer = new DispatcherTimer();
-        _blinkTimer = new DispatcherTimer();
-        _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            <CheckBox x:Name="NotificationsCheckBox" Content="Prayer notifications enabled" IsChecked="True" Margin="0,18,0,0"/>
 
-        MouseMove += (_, _) => HandleUserInteraction();
-        MouseEnter += (_, _) => HandleUserInteraction();
-        MouseLeave += (_, _) => StartIdleHide();
-        PreviewMouseRightButtonDown += (_, _) => OpenSettings();
-        KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Escape)
-            {
-                Close();
-            }
-        };
+            <TextBlock Text="Notification reminder (minutes before prayer)" Margin="0,14,0,6" FontWeight="SemiBold"/>
+            <Slider x:Name="NotificationMinutesSlider" Minimum="1" Maximum="30" Value="10" TickPlacement="BottomRight" IsSnapToTickEnabled="True"/>
 
-        _hideTimer.Interval = TimeSpan.FromSeconds(Math.Max(1, _settings.HideDelaySeconds));
-        _hideTimer.Tick += (_, _) =>
-        {
-            if ((DateTime.Now - _lastInteraction).TotalSeconds >= _settings.HideDelaySeconds)
-            {
-                SetVisible(false);
-            }
-        };
-
-        _blinkTimer.Tick += (_, _) =>
-        {
-            TriggerBlink();
-            _blinkTimer.Interval = TimeSpan.FromSeconds(_random.Next(2, 7));
-        };
-
-        _clockTimer.Tick += (_, _) => UpdateCountdownDisplay();
-
-        Loaded += MainWindow_Loaded;
-    }
-
-    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
-    {
-        PositionAtTopCenter();
-        await RefreshPrayerDisplayAsync();
-        StartIdleHide();
-        _blinkTimer.Interval = TimeSpan.FromSeconds(_random.Next(2, 6));
-        _blinkTimer.Start();
-        _clockTimer.Start();
-    }
-
-    private void PositionAtTopCenter()
-    {
-        var workArea = SystemParameters.WorkArea;
-        Left = (workArea.Width - Width) / 2;
-        Top = 10;
-    }
-
-    private void HandleUserInteraction()
-    {
-        _lastInteraction = DateTime.Now;
-        SetVisible(true);
-        _hideTimer.Stop();
-        _hideTimer.Start();
-    }
-
-    private void StartIdleHide()
-    {
-        _hideTimer.Stop();
-        _hideTimer.Start();
-    }
-
-    private void SetVisible(bool visible)
-    {
-        _isVisible = visible;
-        RootBorder.Opacity = visible ? 1 : 0.08;
-        RootBorder.IsHitTestVisible = visible;
-    }
-
-    private void TriggerBlink()
-    {
-        if (!_isVisible)
-        {
-            return;
-        }
-
-        var blinkAnimation = new DoubleAnimation
-        {
-            From = 1.0,
-            To = 0.2,
-            Duration = TimeSpan.FromMilliseconds(120),
-            AutoReverse = true,
-            FillBehavior = FillBehavior.Stop
-        };
-
-        EyeLeft.BeginAnimation(OpacityProperty, blinkAnimation);
-        EyeRight.BeginAnimation(OpacityProperty, blinkAnimation);
-    }
-
-    private async Task RefreshPrayerDisplayAsync()
-    {
-        var timings = await _prayerService.GetTodayTimingsAsync(_settings.SelectedCity, "Indonesia");
-        if (timings is null)
-        {
-            NextPrayerText.Text = "Offline";
-            CountdownText.Text = _settings.SelectedCity;
-            return;
-        }
-
-        _nextPrayer = PrayerScheduleHelper.GetNextPrayer(timings, DateTime.Now);
-        UpdateCountdownDisplay();
-    }
-
-    private void UpdateCountdownDisplay()
-    {
-        if (_nextPrayer is null)
-        {
-            return;
-        }
-
-        var timings = _prayerService.GetCachedTimingsForCity(_settings.SelectedCity);
-        if (timings is not null)
-        {
-            _nextPrayer = PrayerScheduleHelper.GetNextPrayer(timings, DateTime.Now);
-        }
-
-        var remaining = _nextPrayer.Time - DateTime.Now;
-        if (remaining < TimeSpan.Zero)
-        {
-            remaining = TimeSpan.Zero;
-        }
-
-        NextPrayerText.Text = _nextPrayer.Name;
-        CountdownText.Text = remaining.ToString(@"hh\:mm\:ss");
-
-        if (_settings.NotificationsEnabled)
-        {
-            TriggerPrayerNotificationIfNeeded();
-        }
-    }
-
-    private void TriggerPrayerNotificationIfNeeded()
-    {
-        if (_nextPrayer is null)
-        {
-            return;
-        }
-
-        var minutesRemaining = (_nextPrayer.Time - DateTime.Now).TotalMinutes;
-        if (minutesRemaining <= _settings.NotificationMinutesBefore
-            && minutesRemaining > _settings.NotificationMinutesBefore - 1
-            && !string.Equals(_lastNotificationPrayer, _nextPrayer.Name, StringComparison.OrdinalIgnoreCase))
-        {
-            _notificationService.ShowPrayerNotification(_nextPrayer.Name, _nextPrayer.Time);
-            _lastNotificationPrayer = _nextPrayer.Name;
-        }
-    }
-
-    private void OpenSettings()
-    {
-        var settingsWindow = new SettingsWindow(_settings);
-        settingsWindow.Owner = this;
-        settingsWindow.ShowDialog();
-
-        _hideTimer.Interval = TimeSpan.FromSeconds(Math.Max(1, _settings.HideDelaySeconds));
-        _clockTimer.Start();
-        _ = RefreshPrayerDisplayAsync();
-    }
-
-    private void Window_MouseDoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        OpenSettings();
-    }
-}
-
-public sealed class AppSettings
-{
-    public int HideDelaySeconds { get; set; } = 1;
-    public string SelectedCity { get; set; } = "Jakarta";
-    public bool NotificationsEnabled { get; set; } = true;
-    public int NotificationMinutesBefore { get; set; } = 10;
-
-    public static AppSettings Load()
-    {
-        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BadaiNotch");
-        Directory.CreateDirectory(folder);
-        var path = Path.Combine(folder, "settings.json");
-
-        if (!File.Exists(path))
-        {
-            return new AppSettings();
-        }
-
-        try
-        {
-            var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
-        }
-        catch
-        {
-            return new AppSettings();
-        }
-    }
-
-    public void Save()
-    {
-        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BadaiNotch");
-        Directory.CreateDirectory(folder);
-        var path = Path.Combine(folder, "settings.json");
-        var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(path, json);
-    }
-}
-
-public sealed class PrayerTimings
-{
-    public string Fajr { get; set; } = "05:00";
-    public string Dhuhr { get; set; } = "12:00";
-    public string Asr { get; set; } = "15:00";
-    public string Maghrib { get; set; } = "18:00";
-    public string Isha { get; set; } = "19:00";
-}
-
-public sealed class PrayerTimeInfo
-{
-    public string Name { get; init; } = string.Empty;
-    public DateTime Time { get; init; }
-}
-
-public static class PrayerScheduleHelper
-{
-    public static PrayerTimeInfo GetNextPrayer(PrayerTimings timings, DateTime now)
-    {
-        var prayerTimes = new List<PrayerTimeInfo>
-        {
-            new() { Name = "Subuh", Time = ParsePrayerTime(timings.Fajr, now.Date) },
-            new() { Name = "Dzuhur", Time = ParsePrayerTime(timings.Dhuhr, now.Date) },
-            new() { Name = "Ashar", Time = ParsePrayerTime(timings.Asr, now.Date) },
-            new() { Name = "Maghrib", Time = ParsePrayerTime(timings.Maghrib, now.Date) },
-            new() { Name = "Isya", Time = ParsePrayerTime(timings.Isha, now.Date) }
-        };
-
-        foreach (var prayer in prayerTimes)
-        {
-            if (prayer.Time > now)
-            {
-                return prayer;
-            }
-        }
-
-        return new PrayerTimeInfo
-        {
-            Name = "Subuh",
-            Time = ParsePrayerTime(timings.Fajr, now.Date.AddDays(1))
-        };
-    }
-
-    private static DateTime ParsePrayerTime(string value, DateTime date)
-    {
-        var clean = value.Trim();
-        var parts = clean.Split(':');
-        if (parts.Length < 2)
-        {
-            return date.AddHours(5);
-        }
-
-        var hour = int.TryParse(parts[0], out var parsedHour) ? parsedHour : 5;
-        var minute = int.TryParse(parts[1], out var parsedMinute) ? parsedMinute : 0;
-        return new DateTime(date.Year, date.Month, date.Day, hour, minute, 0);
-    }
-}
-
-public sealed class PrayerScheduleService
-{
-    private readonly Dictionary<string, PrayerTimings> _cache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HttpClient _httpClient = new();
-
-    public async Task<PrayerTimings?> GetTodayTimingsAsync(string city, string country)
-    {
-        try
-        {
-            if (_cache.TryGetValue(city, out var cached))
-            {
-                return cached;
-            }
-
-            var encodedCity = Uri.EscapeDataString(city);
-            var encodedCountry = Uri.EscapeDataString(country);
-            var url = $"https://api.aladhan.com/v1/timingsByCity?city={encodedCity}&country={encodedCountry}&method=2";
-            var json = await _httpClient.GetStringAsync(url);
-            using var document = JsonDocument.Parse(json);
-
-            var root = document.RootElement;
-            if (!root.TryGetProperty("data", out var data) || !data.TryGetProperty("timings", out var timings))
-            {
-                return null;
-            }
-
-            var prayerTimings = new PrayerTimings
-            {
-                Fajr = timings.GetProperty("Fajr").GetString() ?? "05:00",
-                Dhuhr = timings.GetProperty("Dhuhr").GetString() ?? "12:00",
-                Asr = timings.GetProperty("Asr").GetString() ?? "15:00",
-                Maghrib = timings.GetProperty("Maghrib").GetString() ?? "18:00",
-                Isha = timings.GetProperty("Isha").GetString() ?? "19:00"
-            };
-
-            _cache[city] = prayerTimings;
-            return prayerTimings;
-        }
-        catch
-        {
-            return _cache.TryGetValue(city, out var available) ? available : null;
-        }
-    }
-
-    public PrayerTimings? GetCachedTimingsForCity(string city)
-    {
-        return _cache.TryGetValue(city, out var value) ? value : null;
-    }
-}
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+                <Button Content="Save" Width="120" Height="32" Click="Save_Click"/>
+            </StackPanel>
+        </StackPanel>
+    </Grid>
+</Window>

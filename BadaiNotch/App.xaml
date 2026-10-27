@@ -1,12 +1,7 @@
-$ErrorActionPreference = "Stop"
-
-$projectPath = Join-Path $PSScriptRoot "BadaiNotch\BadaiNotch.csproj"
-$outputPath = Join-Path $PSScriptRoot "publish"
-
-Write-Host "Restoring project..."
-dotnet restore $projectPath
-
-Write-Host "Publishing Windows app..."
-dotnet publish $projectPath -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o $outputPath
-
-Write-Host "Publish complete. Output folder: $outputPath"
+<Application x:Class="BadaiNotch.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+    </Application.Resources>
+</Application>
