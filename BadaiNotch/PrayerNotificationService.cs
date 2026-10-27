@@ -1,29 +1,14 @@
-using System.Windows;
+using System;
 
 namespace BadaiNotch;
 
-public partial class SettingsWindow : Window
+public sealed class PrayerNotificationService
 {
-    private readonly AppSettings _settings;
-
-    public SettingsWindow(AppSettings settings)
+    public void ShowPrayerNotification(string prayerName, DateTime prayerTime)
     {
-        InitializeComponent();
-        _settings = settings;
-
-        HideDelaySlider.Value = _settings.HideDelaySeconds;
-        CityComboBox.Text = _settings.SelectedCity;
-        NotificationsCheckBox.IsChecked = _settings.NotificationsEnabled;
-        NotificationMinutesSlider.Value = _settings.NotificationMinutesBefore;
-    }
-
-    private void Save_Click(object sender, RoutedEventArgs e)
-    {
-        _settings.HideDelaySeconds = (int)HideDelaySlider.Value;
-        _settings.SelectedCity = CityComboBox.Text;
-        _settings.NotificationsEnabled = NotificationsCheckBox.IsChecked == true;
-        _settings.NotificationMinutesBefore = (int)NotificationMinutesSlider.Value;
-        _settings.Save();
-        Close();
+        // Keep this lightweight so the app remains non-blocking.
+        // We intentionally avoid modal dialogs in the background notifier.
+        _ = prayerName;
+        _ = prayerTime;
     }
 }
